@@ -6,23 +6,70 @@
 import '@/global.css';
 
 import { Platform } from 'react-native';
+import { DefaultTheme, DarkTheme } from 'expo-router/react-navigation'; // or '@react-navigation/native'
 
+export const Palette = {
+  amber: '#F59E0B',
+  green: '#10B981',
+  blue: '#60A5FA',
+  white: '#FFFFFF', 
+} as const;
+
+export const TAP_SLOP = { top: 10, bottom: 10, left: 10, right: 10 };
+
+// constants/theme.ts
 export const Colors = {
   light: {
-    text: '#000000',
-    background: '#ffffff',
-    backgroundElement: '#F0F0F3',
-    backgroundSelected: '#E0E1E6',
-    textSecondary: '#60646C',
+    background: '#F5F5F5',
+    text: '#0D0D0D',
+    grey: '#6B6B6B',
+    border: '#D0D0D0',
+    primary: '#3B82F6',
+    danger: '#EF4444',
+    success: '#10B981',
+    positiveQuantity: '#10B981',
+    negativeQuantity: '#EF4444',
+    muted: '#888',
+    card: '#FFFFFF',
   },
   dark: {
-    text: '#ffffff',
-    background: '#000000',
-    backgroundElement: '#212225',
-    backgroundSelected: '#2E3135',
-    textSecondary: '#B0B4BA',
+    background: '#121212',
+    text: '#FFFFFF',
+    grey: '#888888',
+    border: '#2A2A2A',
+    primary: '#3B82F6',
+    danger: '#EF4444',
+    success: '#10B981',
+    positiveQuantity: '#10B981',
+    negativeQuantity: '#EF4444',
+    muted: '#9A9A9A',
+    card: '#1E1F20',
   },
 } as const;
+
+export const NavLightTheme = {
+  ...DefaultTheme,
+  colors: {
+    ...DefaultTheme.colors,
+    background: Colors.light.background,
+    card: Colors.light.background, // tab/header bar colour; use Colors.light.card if you want it lighter than screens
+    text: Colors.light.text,
+    border: Colors.light.border,
+    primary: Colors.light.primary,
+  },
+};
+
+export const NavDarkTheme = {
+  ...DarkTheme,
+  colors: {
+    ...DarkTheme.colors,
+    background: Colors.dark.background,
+    card: Colors.dark.background,
+    text: Colors.dark.text,
+    border: Colors.dark.border,
+    primary: Colors.dark.primary,
+  },
+};
 
 export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
 
