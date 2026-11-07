@@ -78,7 +78,7 @@ export default function SigninScreen() {
       return;
     }
 
-    router.replace('/(finance)/positions');
+    router.replace('/(finance)/receipts');
   };
 
   const handleConfirmSwitch = () => {

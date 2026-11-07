@@ -15,3 +15,7 @@ export type { InstrumentOption } from './components/instrument-picker-modal';
 export { default as ReceiptSearch } from './components/receipt-search';
 export { compileFilters } from './utils/receipt-search';
 export type { SearchFilter } from './utils/receipt-search';
+export { buildPositions } from './utils/positions';
+export type { Position } from './types';
+export { buildInstrumentChart } from './utils/instrument-chart';
+export { useFavouriteInstruments } from './hooks/use-favourite-instruments';

@@ -67,7 +67,7 @@ export default function RootLayout() {
   const router = useRouter();
 
   useEffect(() => { initNotifications(); }, []);
-  useEffect(() => subscribeToReceiptTaps(() => router.navigate('/(finance)/positions')), [router]);
+  useEffect(() => subscribeToReceiptTaps(() => router.navigate('/(finance)/receipts')), [router]);
   useEffect(() => {
     SystemUI.setBackgroundColorAsync(navTheme.colors.background);
   }, [navTheme]);

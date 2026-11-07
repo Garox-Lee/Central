@@ -43,3 +43,11 @@ export type Section = {
 
 export type PeriodUnit = 'days' | 'months';
 export type Period = { count: number; unit: PeriodUnit; anchor: Date };
+
+export type Position = {
+  instrument: string;
+  quantity: number;          // settlement cumulative as of the chosen datetime (main number)
+  agreement: number;         // agreement cumulative as of the chosen datetime (shown underneath)
+  receiptCount: number;      // receipts that contributed to either number
+  counterpartyCount: number; // distinct counterparties across those receipts
+};

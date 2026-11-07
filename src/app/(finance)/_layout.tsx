@@ -3,7 +3,7 @@ import { useTheme } from '@/hooks/use-theme';
 
 import { Tabs, router, useSegments } from 'expo-router';
 import { View } from 'react-native';
-import { List, QrCode } from 'lucide-react-native';
+import { List, QrCode, ReceiptText } from 'lucide-react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useUserContext } from '@/context/user-context';
 import { registerPushToken } from '@/utils/notifications';
@@ -46,6 +46,13 @@ export default function FinanceLayout() {
           options={{
             title: 'Positions',
             tabBarIcon: ({ color, size }) => <List color={color} size={size} />,
+          }}
+        />
+        <Tabs.Screen
+          name="receipts"
+          options={{
+            title: 'Receipts',
+            tabBarIcon: ({ color, size }) => <ReceiptText color={color} size={size} />,
           }}
         />
         <Tabs.Screen

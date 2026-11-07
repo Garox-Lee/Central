@@ -11,6 +11,6 @@ export default function Index() {
   }
 
   return isLoggedIn
-    ? <Redirect href="/(finance)/positions" />
+    ? <Redirect href="/(finance)/receipts" />
     : <Redirect href="/(auth)/sign-in" />;
 }

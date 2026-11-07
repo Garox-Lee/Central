@@ -13,3 +13,5 @@ export const VIEW_MODES: { key: ViewMode; label: string }[] = [
   { key: 'incremental', label: 'Incremental' },
   { key: 'cumulative', label: 'Cumulative' },
 ];
+
+export const FAVOURITES_KEY = 'positions-favourites';

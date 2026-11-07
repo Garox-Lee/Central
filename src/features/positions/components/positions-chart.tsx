@@ -1,9 +1,11 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
+
 import { View, Text, StyleSheet, type LayoutChangeEvent } from 'react-native';
 import Svg, { Path, Rect, Line, Circle, Text as SvgText, Defs, ClipPath } from 'react-native-svg';
 import { useTheme } from '@/hooks/use-theme';
 import { formatAmount, qtyColor } from '@/utils/format-numbers';
 import { formatDatetime } from '@/utils/datetime';
+import { Palette } from '@/constants/theme';
 
 export type ChartPoint = {
   key: string;
@@ -13,6 +15,7 @@ export type ChartPoint = {
   detail: string;      // popout subtext, e.g. counterparty
   time: number;        // ms, places the point on the x axis
   spansNow?: boolean;  // collapsed group that contains "now"
+  agreed?: number;     // cumulative agreement at this time (step mode only; draws the amber line and gap)
 };
 
 type Props = {
@@ -140,8 +143,13 @@ function PositionsChart({ points, mode, now, height = 140 }: Props) {
   if (n === 0) return null;
 
   // ---- y scale ----
-  let dataMin = mode === 'bar' ? Math.min(0, ...values) : Math.min(...values);
-  let dataMax = mode === 'bar' ? Math.max(0, ...values) : Math.max(...values);
+  // cumulative view only: the agreement line shares the y scale with the settlement line
+  const hasAgreed = mode === 'step' && points.some((p) => p.agreed !== undefined);
+  const agreed = points.map((p) => p.agreed ?? p.value);
+  const scaled = hasAgreed ? [...values, ...agreed] : values;
+
+  let dataMin = mode === 'bar' ? Math.min(0, ...scaled) : Math.min(...scaled);
+  let dataMax = mode === 'bar' ? Math.max(0, ...scaled) : Math.max(...scaled);
   if (dataMin === dataMax) {
     dataMin -= 1;
     dataMax += 1;
@@ -189,10 +197,28 @@ function PositionsChart({ points, mode, now, height = 140 }: Props) {
 
   // step path: each value holds until the next point's time, the last one to the right edge
   let stepPath = '';
+  let agreedPath = '';
+  let gapPath = '';
   if (mode === 'step') {
     stepPath = `M ${xs[0]} ${y(values[0])}`;
     for (let i = 1; i < n; i++) stepPath += ` H ${xs[i]} V ${y(values[i])}`;
     stepPath += ` H ${width - R}`;
+
+    if (hasAgreed) {
+      // amber is only drawn where it differs from the blue line, so the two never sit on top of each other
+      const differs = (i: number) => Math.abs(agreed[i] - values[i]) > 5e-7;
+      for (let i = 0; i < n; i++) {
+        if (!differs(i)) continue;
+        const x1 = i + 1 < n ? xs[i + 1] : width - R;
+        if (i > 0 && differs(i - 1)) agreedPath += ` M ${xs[i]} ${y(agreed[i - 1])} V ${y(agreed[i])}`;
+        agreedPath += ` M ${xs[i]} ${y(agreed[i])} H ${x1}`;
+      }
+
+      // the gap: out along the settlement line, then back along the agreement line
+      gapPath = `${stepPath} V ${y(agreed[n - 1])}`;
+      for (let i = n - 1; i >= 1; i--) gapPath += ` H ${xs[i]} V ${y(agreed[i - 1])}`;
+      gapPath += ` H ${xs[0]} Z`;
+    }
   }
 
   // ---- touch: tap or drag to inspect, tap the same point again (or the y labels) to dismiss ----
@@ -322,6 +348,23 @@ function PositionsChart({ points, mode, now, height = 140 }: Props) {
               );
             })}
 
+            {/* agreement: shaded gap to the settlement line, plus the amber dotted line */}
+            {hasAgreed && (
+              <>
+                <Path d={gapPath} fill={Palette.amber} fillOpacity={0.15} />
+                {agreedPath !== '' && (
+                  <Path
+                    d={agreedPath}
+                    stroke={Palette.amber}
+                    strokeWidth={2}
+                    fill="none"
+                    strokeDasharray="2,3"
+                    strokeLinecap="round"
+                  />
+                )}
+              </>
+            )}
+
             {/* data */}
             {mode === 'bar' ? (
               points.map((p, i) => {
@@ -403,12 +446,18 @@ function PositionsChart({ points, mode, now, height = 140 }: Props) {
             <Text style={[styles.tipTitle, { color: colors.text }]} numberOfLines={1}>
               {selected.title}
             </Text>
-            <Text style={[styles.tipDetail, { color: colors.muted }]} numberOfLines={1}>
-              {selected.detail}
-            </Text>
             <Text style={[styles.tipValue, { color: qtyColor(selected.value, colors) }]}>
               {formatAmount(selected.value)}
             </Text>
+            {selected.agreed !== undefined ? (
+              <Text style={[styles.tipDetail, styles.tipAgreed, { color: colors.muted }]} numberOfLines={1}>
+                agreed <Text style={{ color: qtyColor(selected.agreed, colors) }}>{formatAmount(selected.agreed)}</Text>
+              </Text>
+            ) : (
+              <Text style={[styles.tipDetail, { color: colors.muted }]} numberOfLines={1}>
+                {selected.detail}
+              </Text>
+            )}
           </View>
         )}
       </View>
@@ -426,11 +475,12 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingVertical: 6,
     paddingHorizontal: 10,
-    gap: 1,
+    gap: 2,
   },
-  tipTitle: { fontSize: 11, fontFamily: 'Courier', fontWeight: '700' },
-  tipDetail: { fontSize: 10, fontFamily: 'Courier' },
-  tipValue: { fontSize: 14, fontFamily: 'Courier', fontWeight: '700', marginTop: 2 },
+  tipTitle: { fontSize: 11, fontFamily: 'Courier', fontWeight: '700', alignSelf: 'flex-end' },
+  tipDetail: { fontSize: 10, fontFamily: 'Courier', alignSelf: 'flex-end' },
+  tipValue: { fontSize: 14, fontFamily: 'Courier', fontWeight: '700', alignSelf: 'flex-end' },
+  tipAgreed: { opacity: 0.6 },
 });
 
 export default memo(PositionsChart);
