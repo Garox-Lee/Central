@@ -9,6 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import CentralLogo from '@/components/central-logo';
 import { ArrowRight, Eye, EyeOff, Lock } from 'lucide-react-native';
+import Constants from 'expo-constants';
 
 const TAP_SLOP = { top: 10, bottom: 10, left: 10, right: 10 };
 
@@ -183,7 +184,7 @@ export default function SigninScreen() {
             <ArrowRight size={16 * iconScale} strokeWidth={2.5} color={colors.text} />
           </TouchableOpacity>
         </View>
-        <Text style={[styles.versionText, { color: colors.text }]}>v1.1.1</Text>
+        <Text style={[styles.versionText, { color: colors.text }]}>v{Constants.expoConfig?.version}</Text>
       </ScrollView>
 
       {/* confirm switch user modal */}

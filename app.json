@@ -2,7 +2,7 @@
   "expo": {
     "name": "Central",
     "slug": "front-end",
-    "version": "1.0.0",
+    "version": "2.1.1",
     "orientation": "portrait",
     "icon": "./assets/images/central-logo-0.40x.png",
     "scheme": "frontend",
