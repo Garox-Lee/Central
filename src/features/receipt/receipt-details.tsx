@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, BackHandler, Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Animated, BackHandler, Keyboard, Platform, StyleSheet, TextInput, TouchableOpacity, View, type KeyboardEvent } from 'react-native';
 import BottomSheet, { BottomSheetBackdrop, BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { ChevronRight } from 'lucide-react-native';
@@ -42,6 +42,7 @@ const renderBackdrop = (props: any) => (
 );
 
 const HANDLE_ALLOWANCE = 30; // space the sheet's drag handle takes at the top of the expanded sheet
+const REVEAL_MARGIN = 16; // gap between the focused input and the top of the keyboard
 
 const NO_OPTIONS: CounterpartyOption[] = [];
 
@@ -64,6 +65,55 @@ export default function ReceiptDetails({
   const allowCloseRef = useRef(false); // true when the close is intentional (save, delete, discard)
   const close = useCallback(() => { allowCloseRef.current = true; sheetRef.current?.close(); }, []);
   const expand = useCallback(() => sheetRef.current?.snapToIndex(1), []);
+
+  // ----- keyboard: keep the focused input visible above the keyboard (only this sheet's scroll view moves) -----
+  const hostRef = useRef<View>(null);
+  const scrollRef = useRef<any>(null);
+  const scrollY = useRef(0);
+  const keyboardTop = useRef<number | null>(null); // screen Y where the keyboard starts; null when hidden
+  const [keyboardOverlap, setKeyboardOverlap] = useState(0); // how much of the sheet the keyboard covers
+
+  // how much of this sheet the keyboard covers (measured, so tab bars / safe areas are handled)
+  useEffect(() => {
+    const onChange = (e: KeyboardEvent) => {
+      const top = e.endCoordinates.screenY;
+      hostRef.current?.measureInWindow((_x, y, _w, h) => {
+        const overlap = Math.max(0, y + h - top);
+        keyboardTop.current = overlap > 0 ? top : null;
+        setKeyboardOverlap(overlap);
+      });
+    };
+    const onHide = () => { keyboardTop.current = null; setKeyboardOverlap(0); };
+
+    const subs = Platform.OS === 'ios'
+      ? [Keyboard.addListener('keyboardWillChangeFrame', onChange)] // also fires on hide (overlap becomes 0)
+      : [Keyboard.addListener('keyboardDidShow', onChange), Keyboard.addListener('keyboardDidHide', onHide)];
+    return () => subs.forEach((s) => s.remove());
+  }, []);
+
+  // scroll the focused input so its bottom edge sits just above the keyboard
+  const revealFocusedInput = useCallback(() => {
+    const kbTop = keyboardTop.current;
+    const input: any = (TextInput as any).State?.currentlyFocusedInput?.();
+    if (kbTop == null || !input) return;
+    input.measureInWindow((_x: number, y: number, _w: number, h: number) => {
+      const overshoot = y + h + REVEAL_MARGIN - kbTop;
+      if (overshoot > 0) scrollRef.current?.scrollTo({ y: scrollY.current + overshoot, animated: true });
+    });
+  }, []);
+
+  // keyboard just appeared / changed height: wait for the padding to apply, then reveal
+  useEffect(() => {
+    if (keyboardOverlap === 0) return;
+    const t = setTimeout(revealFocusedInput, 150);
+    return () => clearTimeout(t);
+  }, [keyboardOverlap, revealFocusedInput]);
+
+  // any field in the sheet gained focus: expand, and reveal it (covers moving between legs with the keyboard open)
+  const handleFieldFocus = useCallback(() => {
+    expand();
+    setTimeout(revealFocusedInput, 350); // after the sheet's expand animation
+  }, [expand, revealFocusedInput]);
 
   // ----- ui state -----
   const status = getReceiptStatus(receipt);
@@ -205,6 +255,7 @@ export default function ReceiptDetails({
 
   return (
     <View
+      ref={hostRef}
       style={styles.sheetHost}
       pointerEvents="box-none"
       onLayout={(e) => setContainerH(e.nativeEvent.layout.height)}
@@ -221,7 +272,7 @@ export default function ReceiptDetails({
         onClose={onClose}
         backgroundStyle={{ backgroundColor: colors.background }}
         handleIndicatorStyle={{ backgroundColor: colors.muted }}
-        keyboardBehavior="interactive"
+        keyboardBehavior="extend"
         keyboardBlurBehavior="restore"
         android_keyboardInputMode="adjustResize"
       >
@@ -236,10 +287,12 @@ export default function ReceiptDetails({
             <View style={{ width: history.width, height: bodyH > 0 ? bodyH : undefined }}>
               {/* key={bodyH}: remount once the real height is known, otherwise it keeps its first (content-sized) layout */}
               <BottomSheetScrollView
+                ref={scrollRef}
                 key={bodyH}
                 style={bodyH > 0 ? { height: bodyH } : styles.scroll}
-                contentContainerStyle={styles.content}
+                contentContainerStyle={[styles.content, keyboardOverlap > 0 && { paddingBottom: 30 + keyboardOverlap }]}
                 keyboardShouldPersistTaps="handled"
+                onScroll={(e) => { scrollY.current = e.nativeEvent.contentOffset.y; }}
               >
                 {/* header: date, id, counterparty, total, shared notes */}
                 <View style={styles.block}>
@@ -261,7 +314,7 @@ export default function ReceiptDetails({
                       link={link}
                       options={counterpartyOptions}
                       onPick={handlePickCounterparty}
-                      onFocus={expand}
+                      onFocus={handleFieldFocus}
                     />
                     <Text style={[styles.amountText, styles.amountNoShrink, { color: qtyColor(audAmount, colors) }]}>
                       {formatCurrency(audAmount)}
@@ -275,7 +328,7 @@ export default function ReceiptDetails({
                     savedValue={receipt.sharedNotes}
                     placeholder="Visible to counterparty"
                     onChange={(t) => form.set('sharedNotes', t)}
-                    onFocus={expand}
+                    onFocus={handleFieldFocus}
                   />
                 </View>
 
@@ -304,7 +357,7 @@ export default function ReceiptDetails({
                     tags={values.tags}
                     savedTags={receipt.tags}
                     api={form.tagApi}
-                    onFocus={expand}
+                    onFocus={handleFieldFocus}
                   />
 
                   <NoteField
@@ -314,7 +367,7 @@ export default function ReceiptDetails({
                     savedValue={receipt.personalNotes}
                     placeholder="Notes that only you can see"
                     onChange={(t) => form.set('personalNotes', t)}
-                    onFocus={expand}
+                    onFocus={handleFieldFocus}
                   />
                 </View>
 
@@ -330,7 +383,7 @@ export default function ReceiptDetails({
                     editable={editable}
                     canAddTransaction={isBlank}
                     ops={form.legOps}
-                    onFocus={expand}
+                    onFocus={handleFieldFocus}
                     onAlert={setAlertMessage}
                   />
                 )}
