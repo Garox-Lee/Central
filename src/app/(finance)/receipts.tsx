@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useReceipts, useAddReceipt, useUpdateReceipt, useDeleteReceipt, useConfirmReceipt, useDeclineReceipt, useResolveAmendment, useWithdrawForEdit, useRefreshReceipts } from '@/context/receipts-context';
 import { useTheme } from '@/hooks/use-theme';
 import { useAdaptiveLayout } from '@/hooks/use-adaptive-layout';
+import { useNow } from '@/hooks/use-now';
 
 import { View, SectionList, ScrollView, RefreshControl, StyleSheet, TouchableOpacity } from 'react-native';
 import { AppText as Text } from '@/components/app-text';
@@ -9,21 +10,22 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Plus } from 'lucide-react-native';
 import { addDays, ymd } from '@/utils/datetime';
 import { formatAmount, qtyColor, round6 } from '@/utils/format-numbers';
+import SegmentedControl from '@/components/segmented-control';
 import { consumePendingReceiptId, subscribeToReceiptTaps } from '@/utils/notifications';
 import { ReceiptDetails, blankReceipt, type Receipt } from '@/features/receipt';
 import {
   ReceiptPickerSheet, ReceiptRow, ReceiptSearch, GroupPeriodModal,
   usePositionsSettings, useScrollSnap,
-  NO_DATES,
-  periodRange, periodText,
-  buildListRows, byTime, compileFilters, counts, keyExtractor,
+  NOW_KEY, NO_DATES, DATETIME_TYPES,
+  periodKey, periodRange, periodText,
+  buildListRows, byTime, compileFilters, counts, isNowRow, keyExtractor,
   type ListRow, type Row, type SearchFilter, type Section,
   type Period,
 } from '@/features/positions';
 import { Palette, TAP_SLOP } from '@/constants/theme';
+import { NowDivider } from '@/components/now-divider';
 
-// the receipts list is fixed: dated by agreement, shown in AUD, period totals only
-const DATETIME_TYPE = 'agreement' as const;
+// the receipts list is shown in AUD, period totals only
 const DISPLAY_INSTRUMENT = 'AUD';
 
 export default function ReceiptsScreen() {
@@ -41,9 +43,15 @@ export default function ReceiptsScreen() {
   const refreshReceipts = useRefreshReceipts();
 
   // ----- persisted view settings -----
-  const { period, setPeriod, collapsedDates, setCollapsedDates, hydrated } = usePositionsSettings(receipts);
+  const {
+    datetimeType, setDatetimeType,
+    period, setPeriod,
+    collapsedDates, setCollapsedDates,
+    hydrated,
+  } = usePositionsSettings(receipts);
 
   // ----- transient UI state -----
+  const now = useNow();
   const [refreshing, setRefreshing] = useState(false);
   const [filters, setFilters] = useState<SearchFilter[]>([]);
   const [searchCollapsed, setSearchCollapsed] = useState<Set<string>>(NO_DATES);
@@ -69,20 +77,20 @@ export default function ReceiptsScreen() {
     return [...byId.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
   }, [receipts]);
 
-  // rows; newest first
+  // rows for the active datetime type (ignores now, period); newest first
   const rows = useMemo<ListRow[]>(() => {
     if (!hydrated) return [];
     const keep = filters.length > 0 ? compileFilters(filters) : undefined;
-    const built = buildListRows(receipts, DATETIME_TYPE, DISPLAY_INSTRUMENT, keep);
+    const built = buildListRows(receipts, datetimeType, DISPLAY_INSTRUMENT, keep);
     built.sort(byTime);
     for (const r of built) {
       r.counted = round6(r.parts.reduce((s, p) => (counts(p.receipt) ? s + p.counted : s), 0));
     }
     return built.reverse();
-  }, [hydrated, receipts, filters]);
+  }, [hydrated, receipts, datetimeType, filters]);
 
-  // grouped into periods
-  const sections = useMemo<Section[]>(() => {
+  // grouped into periods (ignores now)
+  const grouped = useMemo<Section[]>(() => {
     const out: Section[] = [];
     let current: Section | null = null;
     let lo = 0;
@@ -105,15 +113,48 @@ export default function ReceiptsScreen() {
     return out;
   }, [rows, period]);
 
+  // settlement mode: place the "now" line
+  const sections = useMemo<Section[]>(() => {
+    if (datetimeType === 'agreement') return grouped;
+
+    const nowKey = periodKey(new Date(now), period);
+    const nowSection = grouped.find((s) => s.dateKey === nowKey);
+
+    if (nowSection) {
+      // line goes inside the period that contains now
+      let idx = nowSection.data.findIndex((r) => (r as ListRow).t <= now);
+      if (idx === -1) idx = nowSection.data.length;
+      return grouped.map((s) =>
+        s !== nowSection
+          ? s
+          : {
+              ...s,
+              hasDivider: true,
+              data: [...s.data.slice(0, idx), { id: NOW_KEY }, ...s.data.slice(idx)],
+            }
+      );
+    }
+
+    // now falls in a period with no rows: standalone line between the neighbouring periods
+    const at = grouped.findIndex((s) => s.dateKey < nowKey);
+    const out = [...grouped];
+    out.splice(at === -1 ? out.length : at, 0, { dateKey: NOW_KEY, date: '', data: [{ id: NOW_KEY }] });
+    return out;
+  }, [grouped, now, datetimeType, period]);
+
+  const dateSections = useMemo(() => sections.filter((s) => s.dateKey !== NOW_KEY), [sections]);
   const searching = filters.length > 0;
-  const currentCollapsed = searching ? searchCollapsed : (collapsedDates?.[DATETIME_TYPE] ?? NO_DATES);
-  const allExpanded = sections.every((s) => !currentCollapsed.has(s.dateKey));
+  const currentCollapsed = searching ? searchCollapsed : (collapsedDates?.[datetimeType] ?? NO_DATES);
+  const allExpanded = dateSections.every((s) => !currentCollapsed.has(s.dateKey));
   const showDate = !(period.unit === 'days' && period.count === 1);
   const periodLabel = `${period.count} ${period.unit === 'days' ? 'day' : 'month'}${period.count === 1 ? '' : 's'}`;
 
   // what the list renders: collapsed groups show no rows
   const displaySections = useMemo(
-    () => sections.map((section) => (currentCollapsed.has(section.dateKey) ? { ...section, data: [] } : section)),
+    () =>
+      sections.map((section) =>
+        section.dateKey === NOW_KEY || !currentCollapsed.has(section.dateKey) ? section : { ...section, data: [] }
+      ),
     [sections, currentCollapsed]
   );
 
@@ -121,7 +162,7 @@ export default function ReceiptsScreen() {
   const { listRef, renderCount, hideList, onScrollToIndexFailed, onContentSizeChange } = useScrollSnap({
     sections,
     displaySections,
-    datetimeType: DATETIME_TYPE,
+    datetimeType,
     searching,
     hydrated,
   });
@@ -175,12 +216,12 @@ export default function ReceiptsScreen() {
   };
 
   const toggleAll = () => {
-    const next = allExpanded ? new Set(sections.map((s) => s.dateKey)) : new Set<string>();
+    const next = allExpanded ? new Set(dateSections.map((s) => s.dateKey)) : new Set<string>();
     if (searching) {
       setSearchCollapsed(next);
       return;
     }
-    setCollapsedDates((prev) => prev && { ...prev, [DATETIME_TYPE]: next });
+    setCollapsedDates((prev) => prev && { ...prev, [datetimeType]: next });
   };
 
   const toggleDate = useCallback(
@@ -194,34 +235,38 @@ export default function ReceiptsScreen() {
         setSearchCollapsed(flip);
         return;
       }
-      setCollapsedDates((prev) => prev && { ...prev, [DATETIME_TYPE]: flip(prev[DATETIME_TYPE]) });
+      setCollapsedDates((prev) => prev && { ...prev, [datetimeType]: flip(prev[datetimeType]) });
     },
-    [searching, setCollapsedDates]
+    [searching, datetimeType, setCollapsedDates]
   );
 
   const renderSectionHeader = useCallback(
     ({ section }: { section: Section }) => {
+      if (section.dateKey === NOW_KEY) return null;
+      const isNow = section.hasDivider;
+      const isFirst = section.dateKey === dateSections[0]?.dateKey && sections[0]?.dateKey !== NOW_KEY;
       const value = section.aggregate ?? 0;
-      const isFirst = section.dateKey === sections[0]?.dateKey;
       return (
         <TouchableOpacity
           onPress={() => toggleDate(section.dateKey)}
           activeOpacity={0.7}
           style={[styles.dateHeader, isFirst && { marginTop: 0 }]}
         >
-          <Text style={[styles.dateText, { color: colors.text }]}>{section.date}</Text>
+          <Text style={[styles.dateText, { color: isNow ? Palette.blue : colors.text }]}>{section.date}</Text>
           <Text style={[styles.amount, styles.amountNoShrink, { color: qtyColor(value, colors) }]}>
             {formatAmount(value)}
           </Text>
         </TouchableOpacity>
       );
     },
-    [colors, toggleDate, sections]
+    [colors, toggleDate, sections, dateSections]
   );
 
   const renderItem = useCallback(
     ({ item }: { item: Row }) => {
-      const row = item as ListRow; // no now-rows on this screen
+      if (isNowRow(item)) return <NowDivider />;
+
+      const row = item as ListRow;
       return (
         <ReceiptRow
           row={row}
@@ -260,30 +305,34 @@ export default function ReceiptsScreen() {
     <SafeAreaView edges={['top']} style={[styles.safeArea, { backgroundColor: colors.background }]}>
       <View style={[styles.topBar, selectedTx && { zIndex: 0 }]}>
         <View style={styles.header}>
-          <View style={[styles.splitButton, { borderColor: colors.border }]}>
-            <TouchableOpacity
-              onPress={() => setPeriodModalOpen(true)}
-              activeOpacity={0.7}
-              accessibilityRole="button"
-              accessibilityLabel={`Group by ${periodLabel}`}
-              style={styles.splitLeft}
-            >
-              <Text style={[styles.splitText, { color: colors.text }]}>{periodLabel}</Text>
-            </TouchableOpacity>
+          <View style={styles.headerLeft}>
+            <SegmentedControl options={DATETIME_TYPES} value={datetimeType} onChange={setDatetimeType} fullWidth={false} />
 
-            <View style={[styles.splitDivider, { backgroundColor: colors.border }]} />
+            <View style={[styles.splitButton, { borderColor: colors.border }]}>
+              <TouchableOpacity
+                onPress={() => setPeriodModalOpen(true)}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={`Group by ${periodLabel}`}
+                style={styles.splitLeft}
+              >
+                <Text style={[styles.splitText, { color: colors.text }]}>{periodLabel}</Text>
+              </TouchableOpacity>
 
-            <TouchableOpacity
-              onPress={toggleAll}
-              activeOpacity={0.7}
-              accessibilityRole="button"
-              accessibilityLabel={allExpanded ? 'Collapse all' : 'Expand all'}
-              style={styles.splitRight}
-            >
-              <Text style={[styles.splitText, { color: colors.text }]}>
-                {allExpanded ? 'Expanded' : 'Collapsed'}
-              </Text>
-            </TouchableOpacity>
+              <View style={[styles.splitDivider, { backgroundColor: colors.border }]} />
+
+              <TouchableOpacity
+                onPress={toggleAll}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={allExpanded ? 'Collapse all' : 'Expand all'}
+                style={styles.splitRight}
+              >
+                <Text style={[styles.splitText, { color: colors.text }]}>
+                  {allExpanded ? 'Expanded' : 'Collapsed'}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           <TouchableOpacity
@@ -301,7 +350,7 @@ export default function ReceiptsScreen() {
       </View>
 
       <View style={styles.container}>
-        {sections.length === 0 ? (
+        {dateSections.length === 0 ? (
           <ScrollView contentContainerStyle={styles.emptyState} refreshControl={refreshControl}>
             {searching ? (
               <>
@@ -384,11 +433,12 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1 },
 
   // top bar
-  topBar: { paddingHorizontal: 15, paddingBottom: 6, gap: 15, zIndex: 10 },
+  topBar: { paddingHorizontal: 15, paddingBottom: 8, gap: 8, zIndex: 10 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 },
   plus: { paddingRight: 5, flexShrink: 0 },
 
-  splitButton: { flexDirection: 'row', alignItems: 'stretch', borderWidth: 1, borderRadius: 8, overflow: 'hidden', flexShrink: 1 }, // shrinks so the + button can never be pushed off-screen
+  splitButton: { flexDirection: 'row', alignItems: 'stretch', borderWidth: 1, borderRadius: 8, overflow: 'hidden', flexShrink: 1 },
   splitLeft: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 6, paddingHorizontal: 10, flexShrink: 1 },
   splitDivider: { width: 1 },
   splitRight: { justifyContent: 'center', paddingVertical: 6, paddingHorizontal: 10, flexShrink: 1 },
